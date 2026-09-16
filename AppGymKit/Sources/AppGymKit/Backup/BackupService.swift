@@ -24,6 +24,11 @@ public enum BackupService {
                     id: template.id,
                     name: template.name,
                     createdAt: template.createdAt,
+                    // `compactMap` here relies on `exercise` never actually
+                    // being nil: exercises are archived, never hard-deleted
+                    // (see ARCHITECTURE.md), so every item/entry should have
+                    // one. If that ever stops holding, this would silently
+                    // drop the item from the backup instead of failing loudly.
                     items: template.orderedExerciseItems.compactMap { item in
                         guard let exerciseID = item.exercise?.id else { return nil }
                         return TemplateExerciseItemDTO(id: item.id, order: item.order, initialSetCount: item.initialSetCount, exerciseID: exerciseID)
