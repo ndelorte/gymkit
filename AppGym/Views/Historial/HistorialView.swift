@@ -8,6 +8,8 @@ struct HistorialView: View {
     @Query(filter: #Predicate<WorkoutSession> { !$0.isActive }, sort: \WorkoutSession.date, order: .reverse)
     private var sessions: [WorkoutSession]
 
+    @State private var saveError: String?
+
     var body: some View {
         NavigationStack {
             Group {
@@ -33,13 +35,14 @@ struct HistorialView: View {
             }
             .navigationTitle("Historial")
         }
+        .persistenceErrorAlert($saveError)
     }
 
     private func delete(at offsets: IndexSet) {
         for index in offsets {
             context.delete(sessions[index])
         }
-        try? context.save()
+        saveError = PersistenceResult.save(context)
     }
 }
 

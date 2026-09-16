@@ -12,6 +12,7 @@ struct ActiveWorkoutView: View {
     @State private var isPresentingReorderSheet = false
     @State private var finishError: String?
     @State private var entryPendingRemoval: ExerciseEntry?
+    @State private var saveError: String?
 
     var body: some View {
         List {
@@ -132,6 +133,7 @@ struct ActiveWorkoutView: View {
         } message: {
             Text("Se perderán las series registradas para este ejercicio en la sesión de hoy.")
         }
+        .persistenceErrorAlert($saveError)
     }
 
     // MARK: - Previous session reference
@@ -202,7 +204,7 @@ struct ActiveWorkoutView: View {
     }
 
     private func save() {
-        try? context.save()
+        saveError = PersistenceResult.save(context)
     }
 }
 

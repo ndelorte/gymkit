@@ -16,6 +16,7 @@ struct EjerciciosView: View {
     @State private var pendingImportURL: URL?
     @State private var exportDocument: BackupDocument?
     @State private var backupMessage: String?
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -39,7 +40,7 @@ struct EjerciciosView: View {
                             .swipeActions {
                                 Button(exercise.isArchived ? "Reactivar" : "Archivar") {
                                     exercise.isArchived.toggle()
-                                    try? context.save()
+                                    saveError = PersistenceResult.save(context)
                                 }
                                 .tint(exercise.isArchived ? .green : .orange)
                             }
@@ -110,6 +111,7 @@ struct EjerciciosView: View {
             }, message: {
                 Text(backupMessage ?? "")
             })
+            .persistenceErrorAlert($saveError)
         }
     }
 

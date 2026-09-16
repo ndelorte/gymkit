@@ -40,14 +40,31 @@ public enum ExerciseLibrarySeeder {
         ("Rueda abdominal", "Core")
     ]
 
+    /// Runs at app launch, before any UI can show an alert, so failures here
+    /// can't be surfaced to the user the way `PersistenceResult` does for
+    /// in-app mutations — but they must still not be swallowed silently.
+    /// `assertionFailure` traps in debug builds (so it's caught during
+    /// development) without crashing a release build over a library that,
+    /// worst case, the user can still populate manually via "+" on the
+    /// Ejercicios tab.
     @MainActor
     public static func seedIfNeeded(context: ModelContext) {
-        let existingNames = Set((try? context.fetch(FetchDescriptor<Exercise>()))?.map(\.name) ?? [])
+        let existingNames: Set<String>
+        do {
+            existingNames = Set(try context.fetch(FetchDescriptor<Exercise>()).map(\.name))
+        } catch {
+            assertionFailure("No se pudo leer la biblioteca de ejercicios antes de sembrarla: \(error)")
+            return
+        }
         guard existingNames.isEmpty else { return }
 
         for entry in defaultExercises {
             context.insert(Exercise(name: entry.name, muscleGroup: entry.muscleGroup))
         }
-        try? context.save()
+        do {
+            try context.save()
+        } catch {
+            assertionFailure("No se pudo guardar la biblioteca de ejercicios sembrada: \(error)")
+        }
     }
 }

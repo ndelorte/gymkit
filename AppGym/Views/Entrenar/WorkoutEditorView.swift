@@ -14,6 +14,7 @@ struct WorkoutEditorView: View {
     @State private var name: String
     @State private var items: [EditableTemplateItem]
     @State private var isPresentingPicker = false
+    @State private var saveError: String?
 
     init(template: WorkoutTemplate?) {
         self.template = template
@@ -80,6 +81,7 @@ struct WorkoutEditorView: View {
                 }
             }
         }
+        .persistenceErrorAlert($saveError)
     }
 
     private var canSave: Bool {
@@ -105,8 +107,14 @@ struct WorkoutEditorView: View {
         if template == nil {
             context.insert(target)
         }
-        try? context.save()
-        dismiss()
+
+        // Only leave the form if the save actually persisted — otherwise the
+        // sheet would close as if the template were saved when it wasn't.
+        if let error = PersistenceResult.save(context) {
+            saveError = error
+        } else {
+            dismiss()
+        }
     }
 }
 
