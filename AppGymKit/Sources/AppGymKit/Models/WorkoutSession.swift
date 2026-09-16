@@ -90,4 +90,12 @@ public final class SetEntry {
         self.reps = reps
         self.isCompleted = isCompleted
     }
+
+    /// Whether this set records anything that could have actually happened.
+    /// A set with no weight and zero reps is a blank placeholder — it must
+    /// never be treated as "performed," even if `isCompleted` says so (e.g.
+    /// bodyweight work has `weight == nil` but `reps > 0`, which counts).
+    public var hasRecordedPerformance: Bool {
+        weight != nil || reps > 0
+    }
 }

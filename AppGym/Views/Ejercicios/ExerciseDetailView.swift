@@ -25,7 +25,7 @@ struct ExerciseDetailView: View {
             Section {
                 HStack {
                     StatTile(title: "Última sesión", value: history.first.map { $0.session.date.formatted(date: .abbreviated, time: .omitted) } ?? "—")
-                    StatTile(title: "Peso máximo", value: maxWeight.map { formatWeight($0) + " kg" } ?? "—")
+                    StatTile(title: "Peso máximo", value: maxWeight.map { WeightFormatting.string(for: $0) + " kg" } ?? "—")
                 }
                 .listRowInsets(EdgeInsets())
                 .padding(.vertical, 8)
@@ -54,7 +54,7 @@ struct ExerciseDetailView: View {
                                 .font(.subheadline.weight(.medium))
                             ForEach(item.entry.orderedSets) { set in
                                 HStack {
-                                    Text("\(formatWeight(set.weight ?? 0)) kg × \(set.reps)")
+                                    Text("\(weightLabel(for: set)) × \(set.reps)")
                                         .font(.callout.monospacedDigit())
                                     if PersonalRecordCalculator.isPersonalRecord(set, exercise: exercise, context: context) {
                                         Image(systemName: "trophy.fill")
@@ -74,8 +74,13 @@ struct ExerciseDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func formatWeight(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    /// A `nil` weight is a legitimate bodyweight set (e.g. dominadas × 10),
+    /// not "zero" — showing "–" instead of "0 kg" keeps that distinction
+    /// visible in the history list, matching the convention used for the
+    /// "Anterior" label during an active workout.
+    private func weightLabel(for set: SetEntry) -> String {
+        let text = WeightFormatting.string(for: set.weight)
+        return text.isEmpty ? "–" : "\(text) kg"
     }
 }
 

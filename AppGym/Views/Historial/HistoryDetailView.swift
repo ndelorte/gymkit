@@ -13,6 +13,7 @@ struct HistoryDetailView: View {
     @State private var isPresentingExercisePicker = false
     @State private var isPresentingDeleteConfirmation = false
     @State private var entryPendingRemoval: ExerciseEntry?
+    @State private var saveError: String?
 
     var body: some View {
         List {
@@ -82,8 +83,14 @@ struct HistoryDetailView: View {
         ) {
             Button("Eliminar", role: .destructive) {
                 context.delete(session)
-                try? context.save()
-                dismiss()
+                // Only leave the screen if the deletion actually persisted —
+                // otherwise the session would still exist on disk while the
+                // UI has already navigated away as if it were gone.
+                if let error = PersistenceResult.save(context) {
+                    saveError = error
+                } else {
+                    dismiss()
+                }
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
@@ -102,6 +109,7 @@ struct HistoryDetailView: View {
         } message: {
             Text("Se perderán las series registradas para este ejercicio en esta sesión.")
         }
+        .persistenceErrorAlert($saveError)
     }
 
     private var notesBinding: Binding<String> {
@@ -109,8 +117,11 @@ struct HistoryDetailView: View {
     }
 
     private func addSet(to entry: ExerciseEntry) {
+        // Starts blank/not-completed, per SetEntry's own default — it only
+        // becomes "performed" once the user enters real weight or reps (see
+        // HistorySetRowView), never as an empty placeholder.
         let nextOrder = (entry.sets.map(\.order).max() ?? -1) + 1
-        entry.sets.append(SetEntry(order: nextOrder, isCompleted: true))
+        entry.sets.append(SetEntry(order: nextOrder))
         save()
     }
 
@@ -128,7 +139,7 @@ struct HistoryDetailView: View {
         let startingOrder = (session.entries.map(\.order).max() ?? -1) + 1
         for (offset, exercise) in exercises.enumerated() {
             let entry = ExerciseEntry(order: startingOrder + offset, exercise: exercise)
-            entry.sets.append(SetEntry(order: 0, isCompleted: true))
+            entry.sets.append(SetEntry(order: 0))
             session.entries.append(entry)
         }
         save()
@@ -141,13 +152,29 @@ struct HistoryDetailView: View {
     }
 
     private func save() {
-        try? context.save()
+        saveError = PersistenceResult.save(context)
     }
 }
 
+/// Historical sets have no explicit completed toggle in this editor — the
+/// session already happened, so a set here "is completed" exactly when it
+/// records a real performance. `isCompleted` is kept in sync with reps > 0
+/// rather than always forced true, so a newly added blank set doesn't get
+/// persisted as an empty "performed" set until it actually has reps entered
+/// (see `SetEntry.hasRecordedPerformance`).
 private struct HistorySetRowView: View {
     @Bindable var set: SetEntry
     let onChange: () -> Void
+
+    @State private var weightText: String
+    @State private var repsText: String
+
+    init(set: SetEntry, onChange: @escaping () -> Void) {
+        self.set = set
+        self.onChange = onChange
+        _weightText = State(initialValue: WeightFormatting.string(for: set.weight))
+        _repsText = State(initialValue: set.reps == 0 ? "" : String(set.reps))
+    }
 
     var body: some View {
         HStack {
@@ -156,47 +183,43 @@ private struct HistorySetRowView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 60, alignment: .leading)
 
-            TextField("kg", text: weightText)
+            TextField("kg", text: $weightText)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.center)
                 .font(.body.monospacedDigit())
+                .onChange(of: weightText) { _, newValue in applyWeight(newValue) }
 
             Text("×")
                 .foregroundStyle(.secondary)
 
-            TextField("reps", text: repsText)
+            TextField("reps", text: $repsText)
                 .keyboardType(.numberPad)
                 .multilineTextAlignment(.center)
                 .font(.body.monospacedDigit())
+                .onChange(of: repsText) { _, newValue in applyReps(newValue) }
         }
     }
 
-    private var weightText: Binding<String> {
-        Binding(
-            get: { set.weight.map { $0.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", $0) : String(format: "%.1f", $0) } ?? "" },
-            set: { newValue in
-                let normalized = newValue.replacingOccurrences(of: ",", with: ".")
-                if normalized.isEmpty {
-                    set.weight = nil
-                } else if let parsed = Double(normalized), parsed >= 0 {
-                    set.weight = parsed
-                }
-                onChange()
-            }
-        )
+    private func applyWeight(_ newValue: String) {
+        switch WeightFormatting.parse(newValue) {
+        case .empty:
+            set.weight = nil
+        case .value(let parsed):
+            set.weight = parsed
+        case .invalid:
+            break
+        }
+        set.isCompleted = set.hasRecordedPerformance
+        onChange()
     }
 
-    private var repsText: Binding<String> {
-        Binding(
-            get: { set.reps == 0 ? "" : String(set.reps) },
-            set: { newValue in
-                if newValue.isEmpty {
-                    set.reps = 0
-                } else if let parsed = Int(newValue), parsed >= 0 {
-                    set.reps = parsed
-                }
-                onChange()
-            }
-        )
+    private func applyReps(_ newValue: String) {
+        if newValue.isEmpty {
+            set.reps = 0
+        } else if let parsed = Int(newValue), parsed >= 0 {
+            set.reps = parsed
+        }
+        set.isCompleted = set.hasRecordedPerformance
+        onChange()
     }
 }
