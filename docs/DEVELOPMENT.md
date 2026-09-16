@@ -43,6 +43,21 @@ xcrun simctl install <device-id> <path-to>/AppGym.app
 xcrun simctl launch <device-id> com.ndelorte.appgym
 ```
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push/PR to `main`: `AppGymKit`'s
+domain test suite (`swift test`), then `xcodegen generate` + a clean build of
+the `AppGym` target against a generic iOS Simulator destination
+(`CODE_SIGNING_ALLOWED=NO`, no simulator boot needed for a build-only check).
+
+CI does **not** run `AppGymUITests` — booting a simulator in CI adds real
+cost/flakiness for a suite that's cheap to run locally before a release.
+Run it by hand with the command above ("Run the end-to-end UI test") before
+merging anything that touches session lifecycle, backup, or the active
+workout screen. In short: CI proves it builds and the domain logic is
+correct; the UI acceptance test and manual Dark/Light Mode checks remain a
+local/manual step.
+
 ## Notes for whoever (human or agent) touches this next
 
 - `AppGym.xcodeproj` is generated — don't hand-edit it or add files to it
