@@ -7,9 +7,12 @@ public enum BackupService {
 
     @MainActor
     public static func exportData(context: ModelContext) throws -> Data {
-        let exercises = (try? context.fetch(FetchDescriptor<Exercise>())) ?? []
-        let templates = (try? context.fetch(FetchDescriptor<WorkoutTemplate>())) ?? []
-        let sessions = (try? context.fetch(FetchDescriptor<WorkoutSession>())) ?? []
+        // Real `try`, not `try?` — a fetch failure here must fail the export
+        // outright, never silently produce a backup missing whatever didn't
+        // read correctly.
+        let exercises = try context.fetch(FetchDescriptor<Exercise>())
+        let templates = try context.fetch(FetchDescriptor<WorkoutTemplate>())
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
 
         let dto = BackupDTO(
             version: BackupDTO.currentVersion,
@@ -89,6 +92,11 @@ public enum BackupService {
             throw AppGymError.invalidBackup(reason: "hay sesiones duplicadas")
         }
 
+        let activeSessionCount = dto.sessions.filter(\.isActive).count
+        guard activeSessionCount <= 1 else {
+            throw AppGymError.invalidBackup(reason: "hay más de una sesión activa")
+        }
+
         for template in dto.templates {
             for item in template.items {
                 guard exerciseIDs.contains(item.exerciseID) else {
@@ -111,6 +119,15 @@ public enum BackupService {
                     }
                     if let weight = set.weight, weight < 0 {
                         throw AppGymError.invalidBackup(reason: "peso inválido")
+                    }
+                    // Mirrors SetEntry.hasRecordedPerformance: a set marked
+                    // completed must record something. Without this check,
+                    // import is the one path that could still write the
+                    // forbidden state directly into history, bypassing both
+                    // the active-workout toggle guard and `finish`'s cleanup
+                    // (import never calls `finish`).
+                    if set.isCompleted, set.weight == nil, set.reps == 0 {
+                        throw AppGymError.invalidBackup(reason: "hay una serie marcada como completada sin peso ni repeticiones")
                     }
                 }
             }
@@ -160,17 +177,20 @@ public enum BackupService {
             }
 
             for sessionDTO in dto.sessions {
-                // Always import as completed: restoring a backup must never
-                // resurrect (or duplicate) a live in-progress session — that
-                // would bypass the single-active-session invariant, which is
-                // otherwise only enforced by WorkoutSessionService.
+                // `isActive` is restored faithfully — export/import is meant
+                // to be a full roundtrip, including an in-progress workout.
+                // This can't reopen the single-active-session invariant:
+                // `validate` above already rejected any file with more than
+                // one active session, and import always replaces the entire
+                // store, so there's never an existing active session left
+                // over to collide with the restored one.
                 let session = WorkoutSession(
                     id: sessionDTO.id,
                     templateName: sessionDTO.templateName,
                     sourceTemplateID: sessionDTO.sourceTemplateID,
                     date: sessionDTO.date,
                     notes: sessionDTO.notes,
-                    isActive: false
+                    isActive: sessionDTO.isActive
                 )
                 context.insert(session)
                 for entryDTO in sessionDTO.entries {

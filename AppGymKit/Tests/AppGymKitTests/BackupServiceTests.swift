@@ -35,6 +35,33 @@ struct BackupServiceTests {
         #expect(sessions[0].isActive == false)
     }
 
+    /// Import is the one path that could otherwise write a "completed but
+    /// empty" set directly into history without ever going through
+    /// `WorkoutSessionService.finish`'s cleanup or the active-workout
+    /// toggle's guard — `validate` must catch it itself.
+    @Test func backupWithACompletedButEmptySetIsRejected() throws {
+        let exercise = ExerciseDTO(id: UUID(), name: "Press banca", muscleGroup: nil, isArchived: false, createdAt: Date())
+        let emptyCompletedSet = SetEntryDTO(id: UUID(), order: 0, weight: nil, reps: 0, isCompleted: true)
+        let entry = ExerciseEntryDTO(id: UUID(), order: 0, exerciseID: exercise.id, sets: [emptyCompletedSet])
+        let session = WorkoutSessionDTO(
+            id: UUID(),
+            templateName: "Push A",
+            sourceTemplateID: nil,
+            date: Date(),
+            notes: nil,
+            isActive: false,
+            entries: [entry]
+        )
+        let dto = BackupDTO(version: BackupDTO.currentVersion, exercises: [exercise], templates: [], sessions: [session])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(dto)
+
+        #expect(throws: AppGymError.self) {
+            try BackupService.validate(data)
+        }
+    }
+
     @Test func invalidBackupImportDoesNotCorruptExistingStorage() throws {
         let context = TestSupport.makeContext()
         let exercise = Exercise(name: "Press banca")
@@ -86,37 +113,124 @@ struct BackupServiceTests {
         #expect(exercises.count == 1)
     }
 
-    /// Restoring a backup must never resurrect a live in-progress session —
-    /// that would bypass the single-active-session invariant, which is
-    /// otherwise only enforced by `WorkoutSessionService.startSession`.
-    @Test func importingABackupNeverResurrectsAnActiveSession() throws {
+    /// Backup roundtrip is meant to preserve functional state exactly,
+    /// including a session still in progress: it must come back active, with
+    /// its completed and uncompleted sets intact — not silently finished.
+    @Test func activeSessionRoundtripsAsActiveWithPendingAndCompletedSetsPreserved() throws {
+        let sourceContext = TestSupport.makeContext()
+        let exercise = Exercise(name: "Press banca")
+        sourceContext.insert(exercise)
+        let template = TestSupport.makeTemplate(name: "Push A", exercises: [(exercise, 3)], context: sourceContext)
+        let session = try WorkoutSessionService.startSession(from: template, context: sourceContext)
+        let entry = session.orderedEntries[0]
+        TestSupport.markSet(entry, at: 0, weight: 82.5, reps: 8, completed: true)
+        TestSupport.markSet(entry, at: 1, weight: 80, reps: 6, completed: false) // still pending
+        // set index 2 left completely untouched (prepopulated only)
+        try sourceContext.save()
+
+        let sessionID = session.id
+        let data = try BackupService.exportData(context: sourceContext)
+
+        let destinationContext = TestSupport.makeContext()
+        try BackupService.importData(data, context: destinationContext)
+
+        let sessions = try destinationContext.fetch(FetchDescriptor<WorkoutSession>())
+        #expect(sessions.count == 1)
+        let restored = try #require(sessions.first)
+        #expect(restored.id == sessionID)
+        #expect(restored.isActive == true)
+        #expect(try WorkoutSessionService.activeSession(context: destinationContext)?.id == sessionID)
+
+        let restoredSets = restored.orderedEntries[0].orderedSets
+        #expect(restoredSets.count == 3)
+        #expect(restoredSets[0].weight == 82.5)
+        #expect(restoredSets[0].reps == 8)
+        #expect(restoredSets[0].isCompleted == true)
+        #expect(restoredSets[1].weight == 80)
+        #expect(restoredSets[1].reps == 6)
+        #expect(restoredSets[1].isCompleted == false)
+        #expect(restoredSets[2].isCompleted == false)
+    }
+
+    @Test func backupWithNoActiveSessionImportsCleanly() throws {
+        let context = TestSupport.makeContext()
+        let exercise = Exercise(name: "Press banca")
+        context.insert(exercise)
+        let template = TestSupport.makeTemplate(name: "Push A", exercises: [(exercise, 1)], context: context)
+        let session = try WorkoutSessionService.startSession(from: template, context: context)
+        TestSupport.markSet(session.orderedEntries[0], at: 0, weight: 80, reps: 8, completed: true)
+        try WorkoutSessionService.finish(session, context: context)
+
+        let data = try BackupService.exportData(context: context)
+        let dto = try BackupService.validate(data)
+        #expect(dto.sessions.allSatisfy { !$0.isActive })
+
+        let destinationContext = TestSupport.makeContext()
+        try BackupService.importData(data, context: destinationContext)
+        #expect(try WorkoutSessionService.activeSession(context: destinationContext) == nil)
+    }
+
+    /// The single-active-session invariant must hold for imported data too:
+    /// a backup can describe at most one active session.
+    @Test func backupWithMoreThanOneActiveSessionIsRejected() throws {
         let exercise = ExerciseDTO(id: UUID(), name: "Press banca", muscleGroup: nil, isArchived: false, createdAt: Date())
-        let entry = ExerciseEntryDTO(
-            id: UUID(),
-            order: 0,
-            exerciseID: exercise.id,
-            sets: [SetEntryDTO(id: UUID(), order: 0, weight: 80, reps: 8, isCompleted: true)]
+        func activeSession() -> WorkoutSessionDTO {
+            WorkoutSessionDTO(
+                id: UUID(),
+                templateName: "Push A",
+                sourceTemplateID: nil,
+                date: Date(),
+                notes: nil,
+                isActive: true,
+                entries: []
+            )
+        }
+        let dto = BackupDTO(
+            version: BackupDTO.currentVersion,
+            exercises: [exercise],
+            templates: [],
+            sessions: [activeSession(), activeSession()]
         )
-        let stillActiveSession = WorkoutSessionDTO(
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(dto)
+
+        #expect(throws: AppGymError.self) {
+            try BackupService.validate(data)
+        }
+
+        // And the rejection must happen before any store mutation.
+        let context = TestSupport.makeContext()
+        let preexisting = Exercise(name: "Ya existente")
+        context.insert(preexisting)
+        try context.save()
+
+        #expect(throws: AppGymError.self) {
+            try BackupService.importData(data, context: context)
+        }
+        let exercises = try context.fetch(FetchDescriptor<Exercise>())
+        #expect(exercises.count == 1)
+        #expect(exercises[0].name == "Ya existente")
+    }
+
+    @Test func backupWithExactlyOneActiveSessionValidates() throws {
+        let exercise = ExerciseDTO(id: UUID(), name: "Press banca", muscleGroup: nil, isArchived: false, createdAt: Date())
+        let session = WorkoutSessionDTO(
             id: UUID(),
             templateName: "Push A",
             sourceTemplateID: nil,
             date: Date(),
             notes: nil,
             isActive: true,
-            entries: [entry]
+            entries: []
         )
-        let dto = BackupDTO(version: BackupDTO.currentVersion, exercises: [exercise], templates: [], sessions: [stillActiveSession])
+        let dto = BackupDTO(version: BackupDTO.currentVersion, exercises: [exercise], templates: [], sessions: [session])
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(dto)
 
-        let context = TestSupport.makeContext()
-        try BackupService.importData(data, context: context)
-
-        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
-        #expect(sessions.count == 1)
-        #expect(sessions[0].isActive == false)
-        #expect(WorkoutSessionService.activeSession(context: context) == nil)
+        let validated = try BackupService.validate(data)
+        #expect(validated.sessions.count == 1)
+        #expect(validated.sessions[0].isActive == true)
     }
 }
