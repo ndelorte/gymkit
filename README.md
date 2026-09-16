@@ -1,7 +1,17 @@
 # AppGym
 
+Repo: https://github.com/ndelorte/gymkit
+
 MVP v0.1 personal, local, offline gym-tracking app for iPhone. Swift, SwiftUI,
 SwiftData, Swift Charts. No backend, no accounts, no cloud sync.
+
+<img src="docs/screenshots/home.png" alt="AppGym home screen, dark mode" width="320">
+
+## Status
+
+v0.1 MVP, in personal use for real-world feedback before scoping v2. Known
+issues and v2 candidates get tracked as they come up — see
+`docs/PRODUCT_DECISIONS.md` for decisions made so far and open questions.
 
 ## Layout
 
