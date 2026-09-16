@@ -14,6 +14,8 @@ struct HomeView: View {
     @State private var isPresentingNewTemplate = false
     @State private var templateToEdit: WorkoutTemplate?
     @State private var startError: String?
+    @State private var saveError: String?
+    @State private var templatePendingDeletion: WorkoutTemplate?
 
     var body: some View {
         ScrollView {
@@ -58,6 +60,20 @@ struct HomeView: View {
         }, message: {
             Text(startError ?? "")
         })
+        .confirmationDialog(
+            "¿Eliminar \(templatePendingDeletion?.name ?? "este entrenamiento")?",
+            isPresented: .constant(templatePendingDeletion != nil),
+            titleVisibility: .visible
+        ) {
+            Button("Eliminar", role: .destructive) {
+                if let template = templatePendingDeletion { deleteTemplate(template) }
+                templatePendingDeletion = nil
+            }
+            Button("Cancelar", role: .cancel) { templatePendingDeletion = nil }
+        } message: {
+            Text("El historial de entrenamientos ya realizados con esta plantilla no se ve afectado.")
+        }
+        .persistenceErrorAlert($saveError)
     }
 
     private var header: some View {
@@ -96,7 +112,7 @@ struct HomeView: View {
                 } onEdit: {
                     templateToEdit = template
                 } onDelete: {
-                    deleteTemplate(template)
+                    templatePendingDeletion = template
                 }
             }
         }
@@ -129,7 +145,7 @@ struct HomeView: View {
 
     private func deleteTemplate(_ template: WorkoutTemplate) {
         context.delete(template)
-        try? context.save()
+        saveError = PersistenceResult.save(context)
     }
 }
 

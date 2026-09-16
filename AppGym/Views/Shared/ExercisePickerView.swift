@@ -113,6 +113,7 @@ struct NewExerciseView: View {
 
     @State private var name = ""
     @State private var muscleGroup = ""
+    @State private var errorMessage: String?
 
     private let suggestedGroups = ["Pecho", "Espalda", "Piernas", "Hombros", "Brazos", "Core"]
 
@@ -147,15 +148,23 @@ struct NewExerciseView: View {
                 }
             }
         }
+        .persistenceErrorAlert($errorMessage, title: "No se pudo crear el ejercicio")
     }
 
     private func save() {
-        let trimmedName = name.trimmingCharacters(in: .whitespaces)
-        let trimmedGroup = muscleGroup.trimmingCharacters(in: .whitespaces)
-        let exercise = Exercise(name: trimmedName, muscleGroup: trimmedGroup.isEmpty ? nil : trimmedGroup)
-        context.insert(exercise)
-        try? context.save()
-        onCreate(exercise)
-        dismiss()
+        do {
+            let (exercise, outcome) = try ExerciseCreation.createIfNeeded(name: name, muscleGroup: muscleGroup, context: context)
+            switch outcome {
+            case .created, .reactivatedArchived:
+                onCreate(exercise)
+                dismiss()
+            case .alreadyActive:
+                // Don't dismiss and don't create a second, indistinguishable
+                // exercise — let the user rename it or cancel instead.
+                errorMessage = "Ya existe un ejercicio llamado \"\(exercise.name)\"."
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
