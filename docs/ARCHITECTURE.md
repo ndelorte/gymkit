@@ -45,8 +45,10 @@ WorkoutSession ──< ExerciseEntry >── SetEntry    │
    through to `WorkoutTemplate`. Covered by
    `WorkoutSessionServiceTests.changingTemplateDoesNotMutateHistoricalSession`.
 2. **At most one active session.** Enforced in
-   `WorkoutSessionService.startSession`/`startEmptySession` by fetching for
-   an existing `isActive` session first.
+   `WorkoutSessionService.startSession` by fetching for an existing
+   `isActive` session first — this is the *only* place that invariant is
+   enforced, so anything that constructs a `WorkoutSession` directly (e.g.
+   `BackupService.importData`) must not be able to mark it active.
 3. **Pre-populated sets are not "performed" until explicitly completed.**
    `WorkoutSessionService.finish` deletes every `SetEntry` still marked
    `isCompleted == false` before flipping the session to completed — so a
@@ -56,9 +58,12 @@ WorkoutSession ──< ExerciseEntry >── SetEntry    │
    given `Exercise`. `WorkoutSessionService.startSession` uses this to
    pre-fill (but not pre-complete) new sets.
 5. **PRs are derived, never stored.** `PersonalRecordCalculator` computes the
-   max completed weight for an exercise on demand; a set "is a PR" if its
-   weight equals that max. Recomputing from history means editing a past
-   session automatically updates which set is flagged.
+   max completed weight for an exercise on demand across *every* session,
+   active or finished — not just history — so a genuinely heavier set shows
+   the trophy the moment it's marked completed, not only after "Finish" is
+   tapped. A set "is a PR" if its weight equals that max. Recomputing on
+   demand means editing a past session automatically updates which set is
+   flagged.
 6. **Archived exercises stay visible in history.** Archiving only sets a
    flag; `PreviousSessionFinder`/history queries don't filter on it.
 
@@ -84,7 +89,11 @@ exercise ID a template/session refers to must exist, no duplicate IDs,
 non-negative reps/weights) with **no store access at all**; only if that
 succeeds does `importData` touch the `ModelContext`, and if anything throws
 after that point it calls `context.rollback()` before rethrowing, so a
-failed import cannot leave the store partially overwritten.
+failed import cannot leave the store partially overwritten. Every imported
+session is forced to `isActive = false` regardless of what the backup file
+says — restoring a backup must never resurrect a live in-progress session,
+since that's the only way the single-active-session invariant could be
+bypassed (it's otherwise enforced solely in `WorkoutSessionService.startSession`).
 
 ## Why no separate "active session" state machine
 

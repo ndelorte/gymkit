@@ -160,13 +160,17 @@ public enum BackupService {
             }
 
             for sessionDTO in dto.sessions {
+                // Always import as completed: restoring a backup must never
+                // resurrect (or duplicate) a live in-progress session — that
+                // would bypass the single-active-session invariant, which is
+                // otherwise only enforced by WorkoutSessionService.
                 let session = WorkoutSession(
                     id: sessionDTO.id,
                     templateName: sessionDTO.templateName,
                     sourceTemplateID: sessionDTO.sourceTemplateID,
                     date: sessionDTO.date,
                     notes: sessionDTO.notes,
-                    isActive: sessionDTO.isActive
+                    isActive: false
                 )
                 context.insert(session)
                 for entryDTO in sessionDTO.entries {

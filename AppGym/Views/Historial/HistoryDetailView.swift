@@ -12,6 +12,7 @@ struct HistoryDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isPresentingExercisePicker = false
     @State private var isPresentingDeleteConfirmation = false
+    @State private var entryPendingRemoval: ExerciseEntry?
 
     var body: some View {
         List {
@@ -40,9 +41,11 @@ struct HistoryDetailView: View {
                         Text(entry.exercise?.name ?? "Ejercicio")
                         Spacer()
                         Button(role: .destructive) {
-                            removeExercise(entry)
+                            entryPendingRemoval = entry
                         } label: {
                             Image(systemName: "trash")
+                                .frame(width: Theme.minTapTarget, height: Theme.minTapTarget)
+                                .contentShape(Rectangle())
                         }
                     }
                 }
@@ -85,6 +88,19 @@ struct HistoryDetailView: View {
             Button("Cancelar", role: .cancel) {}
         } message: {
             Text("Esta acción no se puede deshacer.")
+        }
+        .confirmationDialog(
+            "¿Quitar \(entryPendingRemoval?.exercise?.name ?? "este ejercicio")?",
+            isPresented: .constant(entryPendingRemoval != nil),
+            titleVisibility: .visible
+        ) {
+            Button("Quitar", role: .destructive) {
+                if let entry = entryPendingRemoval { removeExercise(entry) }
+                entryPendingRemoval = nil
+            }
+            Button("Cancelar", role: .cancel) { entryPendingRemoval = nil }
+        } message: {
+            Text("Se perderán las series registradas para este ejercicio en esta sesión.")
         }
     }
 
@@ -159,7 +175,12 @@ private struct HistorySetRowView: View {
         Binding(
             get: { set.weight.map { $0.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", $0) : String(format: "%.1f", $0) } ?? "" },
             set: { newValue in
-                set.weight = Double(newValue.replacingOccurrences(of: ",", with: "."))
+                let normalized = newValue.replacingOccurrences(of: ",", with: ".")
+                if normalized.isEmpty {
+                    set.weight = nil
+                } else if let parsed = Double(normalized), parsed >= 0 {
+                    set.weight = parsed
+                }
                 onChange()
             }
         )
@@ -169,7 +190,11 @@ private struct HistorySetRowView: View {
         Binding(
             get: { set.reps == 0 ? "" : String(set.reps) },
             set: { newValue in
-                set.reps = Int(newValue) ?? 0
+                if newValue.isEmpty {
+                    set.reps = 0
+                } else if let parsed = Int(newValue), parsed >= 0 {
+                    set.reps = parsed
+                }
                 onChange()
             }
         )

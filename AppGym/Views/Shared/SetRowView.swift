@@ -94,7 +94,13 @@ struct SetRowView: View {
             get: { set.weight.map(formatWeight) ?? "" },
             set: { newValue in
                 let normalized = newValue.replacingOccurrences(of: ",", with: ".")
-                set.weight = Double(normalized)
+                if normalized.isEmpty {
+                    set.weight = nil
+                } else if let parsed = Double(normalized), parsed >= 0 {
+                    set.weight = parsed
+                }
+                // Otherwise (bare "-", stray characters, negative): leave the
+                // last valid value untouched rather than blanking it mid-type.
                 onChange()
             }
         )
@@ -104,7 +110,11 @@ struct SetRowView: View {
         Binding(
             get: { set.reps == 0 ? "" : String(set.reps) },
             set: { newValue in
-                set.reps = Int(newValue) ?? 0
+                if newValue.isEmpty {
+                    set.reps = 0
+                } else if let parsed = Int(newValue), parsed >= 0 {
+                    set.reps = parsed
+                }
                 onChange()
             }
         )

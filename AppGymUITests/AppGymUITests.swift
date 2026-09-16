@@ -189,6 +189,18 @@ final class AppGymUITests: XCTestCase {
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
         app.launch()
 
+        // This test reuses whatever store is already on disk (unlike the
+        // acceptance test, it doesn't reset), so a session left active by a
+        // previous failed run must be cleared before Home is reachable.
+        if !app.buttons["newTemplateButton"].waitForExistence(timeout: 2) {
+            for _ in 0..<8 where !app.buttons["finishWorkoutButton"].exists {
+                app.swipeUp()
+            }
+            if app.buttons["finishWorkoutButton"].exists {
+                finishWorkout(app)
+            }
+        }
+
         attachScreenshot(app, name: "01-home")
 
         app.buttons["newTemplateButton"].tap()
@@ -203,7 +215,18 @@ final class AppGymUITests: XCTestCase {
         startTemplate(app, named: "Push A")
         _ = app.textFields["Press banca_0_weight"].waitForExistence(timeout: 5)
         attachScreenshot(app, name: "01d-active-workout")
-        app.buttons["finishWorkoutButton"].tap()
+
+        // Verify exercise reordering actually renders drag handles with 2+
+        // exercises (Section-per-exercise + .onMove is a known SwiftUI edge case).
+        app.buttons["Añadir ejercicio"].tap()
+        selectExercise(app, named: "Sentadilla")
+        app.buttons["confirmAddExercisesButton"].tap()
+        _ = app.textFields["Sentadilla_0_weight"].waitForExistence(timeout: 5)
+        app.buttons["Reordenar"].tap()
+        attachScreenshot(app, name: "01e-reordering")
+        app.buttons["Listo"].tap()
+
+        scrollToElement(app, app.buttons["finishWorkoutButton"]).tap()
         app.buttons["Finalizar"].tap()
 
         goToTab(app, "Historial")

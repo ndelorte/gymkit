@@ -1,13 +1,20 @@
 import Foundation
 import SwiftData
 
-/// Computes personal-record status from completed history. PRs are derived,
-/// never stored, so they always reflect the current state of history.
+/// Computes personal-record status from every completed set ever logged,
+/// including ones in the session currently in progress — not just finished
+/// history. PRs are derived, never stored, so they always reflect the
+/// current state of the store, and a genuinely heavier set shows the trophy
+/// the moment it's marked completed rather than only after "Finish" is tapped.
 public enum PersonalRecordCalculator {
     @MainActor
     public static func maxCompletedWeight(for exercise: Exercise, context: ModelContext) -> Double? {
-        let history = PreviousSessionFinder.history(for: exercise, context: context)
-        let weights = history.flatMap { $0.entry.sets.filter(\.isCompleted).compactMap(\.weight) }
+        let descriptor = FetchDescriptor<WorkoutSession>()
+        guard let sessions = try? context.fetch(descriptor) else { return nil }
+        let weights = sessions
+            .flatMap { $0.entries }
+            .filter { $0.exercise?.id == exercise.id }
+            .flatMap { $0.sets.filter(\.isCompleted).compactMap(\.weight) }
         return weights.max()
     }
 

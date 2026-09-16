@@ -9,8 +9,9 @@ struct ActiveWorkoutView: View {
     @State private var isPresentingExercisePicker = false
     @State private var isPresentingFinishConfirmation = false
     @State private var isPresentingNotes = false
-    @State private var isReordering = false
+    @State private var isPresentingReorderSheet = false
     @State private var finishError: String?
+    @State private var entryPendingRemoval: ExerciseEntry?
 
     var body: some View {
         List {
@@ -39,14 +40,15 @@ struct ActiveWorkoutView: View {
                         Text(entry.exercise?.name ?? "Ejercicio")
                         Spacer()
                         Button(role: .destructive) {
-                            removeExercise(entry)
+                            entryPendingRemoval = entry
                         } label: {
                             Image(systemName: "trash")
+                                .frame(width: Theme.minTapTarget, height: Theme.minTapTarget)
+                                .contentShape(Rectangle())
                         }
                     }
                 }
             }
-            .onMove(perform: moveExercises)
 
             Section {
                 Button {
@@ -73,19 +75,27 @@ struct ActiveWorkoutView: View {
                 .accessibilityIdentifier("finishWorkoutButton")
             }
         }
-        .environment(\.editMode, .constant(isReordering ? .active : .inactive))
         .navigationTitle(session.templateName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(isReordering ? "Listo" : "Reordenar") {
-                    isReordering.toggle()
+                Button("Reordenar") {
+                    isPresentingReorderSheet = true
                 }
+                .disabled(session.entries.count < 2)
             }
         }
         .sheet(isPresented: $isPresentingExercisePicker) {
             ExercisePickerView(excludedIDs: Set(session.entries.compactMap { $0.exercise?.id })) { added in
                 addExercises(added)
+            }
+        }
+        .sheet(isPresented: $isPresentingReorderSheet) {
+            ReorderExercisesView(entries: session.orderedEntries) { reordered in
+                for (index, entry) in reordered.enumerated() {
+                    entry.order = index
+                }
+                save()
             }
         }
         .sheet(isPresented: $isPresentingNotes) {
@@ -109,6 +119,19 @@ struct ActiveWorkoutView: View {
         }, message: {
             Text(finishError ?? "")
         })
+        .confirmationDialog(
+            "¿Quitar \(entryPendingRemoval?.exercise?.name ?? "este ejercicio")?",
+            isPresented: .constant(entryPendingRemoval != nil),
+            titleVisibility: .visible
+        ) {
+            Button("Quitar", role: .destructive) {
+                if let entry = entryPendingRemoval { removeExercise(entry) }
+                entryPendingRemoval = nil
+            }
+            Button("Cancelar", role: .cancel) { entryPendingRemoval = nil }
+        } message: {
+            Text("Se perderán las series registradas para este ejercicio en la sesión de hoy.")
+        }
     }
 
     // MARK: - Previous session reference
@@ -169,15 +192,6 @@ struct ActiveWorkoutView: View {
         save()
     }
 
-    private func moveExercises(from indices: IndexSet, to offset: Int) {
-        var ordered = session.orderedEntries
-        ordered.move(fromOffsets: indices, toOffset: offset)
-        for (index, entry) in ordered.enumerated() {
-            entry.order = index
-        }
-        save()
-    }
-
     private func finish() {
         do {
             try WorkoutSessionService.finish(session, context: context)
@@ -189,6 +203,43 @@ struct ActiveWorkoutView: View {
 
     private func save() {
         try? context.save()
+    }
+}
+
+/// Reordering exercises gets its own focused list (names only, no nested
+/// sets) rather than an in-place edit mode on the main workout list.
+/// Attaching `.onMove` to a `ForEach` that itself produces `Section`s — each
+/// containing its own `.onDelete`-able set rows — makes SwiftUI show reorder
+/// handles and delete circles on every set row too, not just per exercise,
+/// which is exactly the kind of confusing, error-prone control this app is
+/// meant to avoid during a workout.
+private struct ReorderExercisesView: View {
+    @State var entries: [ExerciseEntry]
+    var onSave: ([ExerciseEntry]) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(entries) { entry in
+                    Text(entry.exercise?.name ?? "Ejercicio")
+                }
+                .onMove { indices, newOffset in
+                    entries.move(fromOffsets: indices, toOffset: newOffset)
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Reordenar ejercicios")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Listo") {
+                        onSave(entries)
+                        dismiss()
+                    }
+                }
+            }
+        }
     }
 }
 

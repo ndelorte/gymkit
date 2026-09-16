@@ -85,4 +85,38 @@ struct BackupServiceTests {
         let exercises = try context.fetch(FetchDescriptor<Exercise>())
         #expect(exercises.count == 1)
     }
+
+    /// Restoring a backup must never resurrect a live in-progress session —
+    /// that would bypass the single-active-session invariant, which is
+    /// otherwise only enforced by `WorkoutSessionService.startSession`.
+    @Test func importingABackupNeverResurrectsAnActiveSession() throws {
+        let exercise = ExerciseDTO(id: UUID(), name: "Press banca", muscleGroup: nil, isArchived: false, createdAt: Date())
+        let entry = ExerciseEntryDTO(
+            id: UUID(),
+            order: 0,
+            exerciseID: exercise.id,
+            sets: [SetEntryDTO(id: UUID(), order: 0, weight: 80, reps: 8, isCompleted: true)]
+        )
+        let stillActiveSession = WorkoutSessionDTO(
+            id: UUID(),
+            templateName: "Push A",
+            sourceTemplateID: nil,
+            date: Date(),
+            notes: nil,
+            isActive: true,
+            entries: [entry]
+        )
+        let dto = BackupDTO(version: BackupDTO.currentVersion, exercises: [exercise], templates: [], sessions: [stillActiveSession])
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(dto)
+
+        let context = TestSupport.makeContext()
+        try BackupService.importData(data, context: context)
+
+        let sessions = try context.fetch(FetchDescriptor<WorkoutSession>())
+        #expect(sessions.count == 1)
+        #expect(sessions[0].isActive == false)
+        #expect(WorkoutSessionService.activeSession(context: context) == nil)
+    }
 }

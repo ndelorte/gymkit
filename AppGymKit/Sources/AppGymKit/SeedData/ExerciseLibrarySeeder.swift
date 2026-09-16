@@ -1,8 +1,10 @@
 import Foundation
 import SwiftData
 
-/// Seeds a basic exercise library on first launch. Idempotent: safe to call on
-/// every app start, it only inserts exercises that aren't already present by name.
+/// Seeds a basic exercise library once, only when the library is completely
+/// empty (a truly fresh install) — it does not diff against existing
+/// exercises, so adding entries to `defaultExercises` later won't retroactively
+/// reach installs that have already been seeded.
 public enum ExerciseLibrarySeeder {
     public static let defaultExercises: [(name: String, muscleGroup: String)] = [
         ("Press banca", "Pecho"),
